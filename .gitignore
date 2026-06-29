@@ -1,0 +1,24 @@
+# Compiled provider binary
+terraform-provider-clavex
+terraform-provider-clavex_v*
+
+# GoReleaser output
+dist/
+
+# Go test / coverage
+*.test
+*.out
+coverage.*
+
+# Terraform local state / plugins
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
