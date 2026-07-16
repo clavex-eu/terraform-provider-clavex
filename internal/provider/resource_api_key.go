@@ -5,8 +5,10 @@ import (
 	"fmt"
 
 	clavex "github.com/clavex-eu/clavex-sdk-go"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -27,13 +29,15 @@ type APIKeyResource struct{ client *clavex.Client }
 func NewAPIKeyResource() resource.Resource { return &APIKeyResource{} }
 
 type apiKeyModel struct {
-	ID        types.String `tfsdk:"id"`
-	Name      types.String `tfsdk:"name"`
-	ExpiresIn types.Int64  `tfsdk:"expires_in"`
-	Prefix    types.String `tfsdk:"prefix"`
-	Secret    types.String `tfsdk:"secret"`
-	ExpiresAt types.String `tfsdk:"expires_at"`
-	CreatedAt types.String `tfsdk:"created_at"`
+	ID          types.String `tfsdk:"id"`
+	Name        types.String `tfsdk:"name"`
+	ExpiresIn   types.Int64  `tfsdk:"expires_in"`
+	OrgID       types.String `tfsdk:"org_id"`
+	Permissions types.List   `tfsdk:"permissions"`
+	Prefix      types.String `tfsdk:"prefix"`
+	Secret      types.String `tfsdk:"secret"`
+	ExpiresAt   types.String `tfsdk:"expires_at"`
+	CreatedAt   types.String `tfsdk:"created_at"`
 }
 
 func (r *APIKeyResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -42,9 +46,12 @@ func (r *APIKeyResource) Metadata(_ context.Context, req resource.MetadataReques
 
 func (r *APIKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a Clavex superadmin API key. " +
+		Description: "Manages a Clavex API key. " +
 			"API keys can be used instead of JWT bearer tokens for machine-to-machine " +
-			"integrations. The plaintext secret is only available at creation time — " +
+			"integrations. By default a key is superadmin-wide (cross-org); set org_id " +
+			"to scope it to a single organization, optionally combined with permissions " +
+			"for fine-grained restriction (e.g. [\"clients:write\"]). " +
+			"The plaintext secret is only available at creation time — " +
 			"it is stored in Terraform state (sensitive) and will never be returned by " +
 			"the API again. Changing any attribute replaces the key (revoke + new).",
 		Attributes: map[string]schema.Attribute{
@@ -62,6 +69,21 @@ func (r *APIKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Optional: true,
 				Description: "Key lifetime in seconds. 0 or omitted = no expiry. " +
 					"Changing this value forces a new resource.",
+			},
+			"org_id": schema.StringAttribute{
+				Optional: true,
+				Description: "Scopes the key to a single organization (UUID). " +
+					"Omitted = superadmin key (cross-org, legacy behaviour). " +
+					"Changing this value forces a new resource.",
+				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
+			},
+			"permissions": schema.ListAttribute{
+				Optional:    true,
+				ElementType: types.StringType,
+				Description: "Optional fine-grained permission list (e.g. \"clients:write\", " +
+					"\"idps:write\") further restricting the key beyond org scoping. " +
+					"Omitted = unrestricted within org scope. Changing this value forces a new resource.",
+				PlanModifiers: []planmodifier.List{listplanmodifier.RequiresReplace()},
 			},
 			"prefix": schema.StringAttribute{
 				Computed:      true,
@@ -105,9 +127,18 @@ func (r *APIKeyResource) Create(ctx context.Context, req resource.CreateRequest,
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	var permissions []string
+	if !plan.Permissions.IsNull() && !plan.Permissions.IsUnknown() {
+		resp.Diagnostics.Append(plan.Permissions.ElementsAs(ctx, &permissions, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
 	result, err := r.client.APIKeys.Create(ctx, clavex.CreateAPIKeyParams{
-		Name:      plan.Name.ValueString(),
-		ExpiresIn: int(plan.ExpiresIn.ValueInt64()),
+		Name:        plan.Name.ValueString(),
+		ExpiresIn:   int(plan.ExpiresIn.ValueInt64()),
+		OrgID:       plan.OrgID.ValueString(),
+		Permissions: permissions,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error creating API key", err.Error())
@@ -124,7 +155,7 @@ func (r *APIKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	keys, err := r.client.APIKeys.List(ctx)
+	keys, err := r.client.APIKeys.List(ctx, "")
 	if err != nil {
 		resp.Diagnostics.AddError("Error listing API keys", err.Error())
 		return
@@ -167,6 +198,20 @@ func flattenAPIKey(key *clavex.APIKey, m *apiKeyModel) {
 	m.ID = types.StringValue(key.ID)
 	m.Name = types.StringValue(key.Name)
 	m.Prefix = types.StringValue(key.Prefix)
+	if key.OrgID != "" {
+		m.OrgID = types.StringValue(key.OrgID)
+	} else {
+		m.OrgID = types.StringNull()
+	}
+	if len(key.Permissions) > 0 {
+		elems := make([]attr.Value, len(key.Permissions))
+		for i, p := range key.Permissions {
+			elems[i] = types.StringValue(p)
+		}
+		m.Permissions = types.ListValueMust(types.StringType, elems)
+	} else {
+		m.Permissions = types.ListNull(types.StringType)
+	}
 	if key.ExpiresAt != nil {
 		m.ExpiresAt = types.StringValue(key.ExpiresAt.Format("2006-01-02T15:04:05Z"))
 	} else {

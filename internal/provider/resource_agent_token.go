@@ -31,6 +31,7 @@ type agentTokenModel struct {
 	Scope       types.String `tfsdk:"scope"`
 	TTLSeconds  types.Int64  `tfsdk:"ttl_seconds"`
 	MCPServerID types.String `tfsdk:"mcp_server_id"`
+	Audience    types.String `tfsdk:"audience"`
 	Token       types.String `tfsdk:"token"`
 	ExpiresAt   types.String `tfsdk:"expires_at"`
 }
@@ -52,6 +53,18 @@ func (r *AgentTokenResource) Schema(_ context.Context, _ resource.SchemaRequest,
 			"scope":         schema.StringAttribute{Optional: true, PlanModifiers: replace},
 			"ttl_seconds":   schema.Int64Attribute{Optional: true, PlanModifiers: []planmodifier.Int64{}},
 			"mcp_server_id": schema.StringAttribute{Optional: true, PlanModifiers: replace},
+			"audience": schema.StringAttribute{
+				Optional:      true,
+				PlanModifiers: replace,
+				Description: "Overrides the token's \"aud\" claim (default: the issuer). Must be " +
+					"pre-approved in the org's agent-token audience allowlist, otherwise issuance " +
+					"fails with invalid_target. Typical use: cloud STS/WIF federation for Terraform, " +
+					"e.g. \"sts.amazonaws.com\" (AWS assume_role_with_web_identity), " +
+					"\"api://AzureADTokenExchange\" (Azure use_oidc), or a GCP Workload Identity " +
+					"Federation pool provider audience (google external_account). Clavex never calls " +
+					"the cloud STS/WIF APIs itself — the resulting `token` is handed directly to the " +
+					"target cloud Terraform provider, which performs its own native OIDC federation.",
+			},
 			"token": schema.StringAttribute{
 				Computed:      true,
 				Sensitive:     true,
@@ -88,6 +101,7 @@ func (r *AgentTokenResource) Create(ctx context.Context, req resource.CreateRequ
 		Scope:       plan.Scope.ValueString(),
 		TTLSeconds:  int(plan.TTLSeconds.ValueInt64()),
 		MCPServerID: strAttrToPtr(plan.MCPServerID),
+		Audience:    strAttrToPtr(plan.Audience),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Error issuing agent token", err.Error())
@@ -119,6 +133,7 @@ func (r *AgentTokenResource) Read(ctx context.Context, req resource.ReadRequest,
 				state.Scope = types.StringValue(tokens[i].Scope)
 			}
 			state.MCPServerID = ptrToStrAttr(tokens[i].MCPServerID)
+			state.Audience = ptrToStrAttr(tokens[i].Audience)
 			state.ExpiresAt = types.StringValue(tokens[i].ExpiresAt.Format("2006-01-02T15:04:05Z07:00"))
 			resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 			return
