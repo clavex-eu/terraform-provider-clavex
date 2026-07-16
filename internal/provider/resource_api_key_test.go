@@ -56,7 +56,7 @@ func TestAPIKeyResource_List(t *testing.T) {
 		},
 	})
 
-	keys, err := client.APIKeys.List(testCtx)
+	keys, err := client.APIKeys.List(testCtx, "")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestAPIKeyResource_CRUD(t *testing.T) {
 	}
 
 	// Read (via list, since there is no Get endpoint for API keys)
-	keys, err := client.APIKeys.List(testCtx)
+	keys, err := client.APIKeys.List(testCtx, "")
 	if err != nil || len(keys) == 0 {
 		t.Fatalf("List: %v (len=%d)", err, len(keys))
 	}
