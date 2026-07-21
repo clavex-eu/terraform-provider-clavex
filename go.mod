@@ -3,7 +3,7 @@ module github.com/clavex-eu/terraform-provider-clavex
 go 1.25.0
 
 require (
-	github.com/clavex-eu/clavex-sdk-go v0.2.0
+	github.com/clavex-eu/clavex-sdk-go v0.3.0
 	github.com/hashicorp/terraform-plugin-framework v1.19.0
 )
 
